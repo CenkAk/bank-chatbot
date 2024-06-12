@@ -61,8 +61,8 @@ def main():
     st.sidebar.write('')
     st.sidebar.markdown("[Send E-Mail](mailto:@)")
     st.sidebar.title('About Me')
-    st.sidebar.write('Eren Kaynar ve Emirhan Topal bitirme projesi.')
-    st.sidebar.write('200403641 - 200403629 ')
+    st.sidebar.write('Orhan Cenk Akcadoğan bitirme projesi.')
+    st.sidebar.write('20703030')
 
     st.title("Bank Chatbot")
 
