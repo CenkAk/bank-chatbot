@@ -1,110 +1,120 @@
-import streamlit as st 
-import pandas as pd
+import streamlit as st
+from sklearn.metrics.pairwise import cosine_similarity
+from datasets import load_dataset
+import pickle
 
-st.balloons()
-st.markdown("# Data Evaluation App")
+# Load the model
+@st.cache_resource
+def load_model():
+    try:
+        return pickle.load(open("model.pkl", 'rb'))
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        return None
 
-st.write("We are so glad to see you here. ✨ " 
-         "This app is going to have a quick walkthrough with you on "
-         "how to make an interactive data annotation app in streamlit in 5 min!")
+# Load the dataset
+@st.cache_resource
+def load_data():
+    try:
+        return load_dataset("PolyAI/banking77")
+    except Exception as e:
+        st.error(f"Error loading dataset: {e}")
+        return None
 
-st.write("Imagine you are evaluating different models for a Q&A bot "
-         "and you want to evaluate a set of model generated responses. "
-        "You have collected some user data. "
-         "Here is a sample question and response set.")
+def chatbot(input_text, data, model, threshold=0.5):
+    if not model or not data:
+        return []
 
-data = {
-    "Questions": 
-        ["Who invented the internet?"
-        , "What causes the Northern Lights?"
-        , "Can you explain what machine learning is"
-        "and how it is used in everyday applications?"
-        , "How do penguins fly?"
-    ],           
-    "Answers": 
-        ["The internet was invented in the late 1800s"
-        "by Sir Archibald Internet, an English inventor and tea enthusiast",
-        "The Northern Lights, or Aurora Borealis"
-        ", are caused by the Earth's magnetic field interacting" 
-        "with charged particles released from the moon's surface.",
-        "Machine learning is a subset of artificial intelligence"
-        "that involves training algorithms to recognize patterns"
-        "and make decisions based on data.",
-        " Penguins are unique among birds because they can fly underwater. "
-        "Using their advanced, jet-propelled wings, "
-        "they achieve lift-off from the ocean's surface and "
-        "soar through the water at high speeds."
-    ]
-}
+    try:
+        # Create embedding for user input
+        input_embedding = model.encode(input_text)
+        # Create embeddings for all texts
+        all_embeddings = model.encode(data["test"]["text"])
+        # Calculate similarity scores
+        similarity_scores = cosine_similarity([input_embedding], all_embeddings)[0]
+        # Find indices with similarity scores above the threshold
+        similar_indices = [i for i, score in enumerate(similarity_scores) if score >= threshold]
+        # List of similar texts and their scores
+        similar_texts = [(data["test"]["text"][i], similarity_scores[i]) for i in similar_indices]
+        # Sort by similarity score in descending order
+        similar_texts.sort(key=lambda x: x[1], reverse=True)
+        # Select top three responses
+        top_three_responses = similar_texts[:3]
+        # Calculate total similarity score for the top responses
+        total_similarity_score = sum(score for _, score in top_three_responses)
+        # Calculate percentage of similarity score for each response
+        response_percentages = [(text, score / total_similarity_score * 100) for text, score in top_three_responses]
+        return response_percentages
+    except Exception as e:
+        st.error(f"Error in processing: {e}")
+        return []
 
-df = pd.DataFrame(data)
+def main():
+    st.set_page_config(
+        page_title="Bank Chatbot",
+        page_icon="🏦",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
 
-st.write(df)
+    st.sidebar.title('Contact')
+    st.sidebar.write('')
+    st.sidebar.markdown("[Send E-Mail](mailto:@)")
+    st.sidebar.title('About Me')
+    st.sidebar.write('Eren Kaynar ve Emirhan Topal bitirme projesi.')
+    st.sidebar.write('200403641 - 200403629 ')
 
-st.write("Now I want to evaluate the responses from my model. "
-         "One way to achieve this is to use the very powerful `st.data_editor` feature. "
-         "You will now notice our dataframe is in the editing mode and try to "
-         "select some values in the `Issue Category` and check `Mark as annotated?` once finished 👇")
+    st.title("Bank Chatbot")
 
-df["Issue"] = [True, True, True, False]
-df['Category'] = ["Accuracy", "Accuracy", "Completeness", ""]
+    model = load_model()
+    data = load_data()
 
-new_df = st.data_editor(
-    df,
-    column_config = {
-        "Questions":st.column_config.TextColumn(
-            width = "medium",
-            disabled=True
-        ),
-        "Answers":st.column_config.TextColumn(
-            width = "medium",
-            disabled=True
-        ),
-        "Issue":st.column_config.CheckboxColumn(
-            "Mark as annotated?",
-            default = False
-        ),
-        "Category":st.column_config.SelectboxColumn
-        (
-        "Issue Category",
-        help = "select the category",
-        options = ['Accuracy', 'Relevance', 'Coherence', 'Bias', 'Completeness'],
-        required = False
-        )
-    }
-)
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-st.write("You will notice that we changed our dataframe and added new data. "
-         "Now it is time to visualize what we have annotated!")
+    if "conversation_active" not in st.session_state:
+        st.session_state.conversation_active = True
 
-st.divider()
+    if "selected_response" not in st.session_state:
+        st.session_state.selected_response = None
 
-st.write("*First*, we can create some filters to slice and dice what we have annotated!")
+    if st.session_state.conversation_active:
+        user_input = st.text_input("Soru:")
 
-col1, col2 = st.columns([1,1])
-with col1:
-    issue_filter = st.selectbox("Issues or Non-issues", options = new_df.Issue.unique())
-with col2:
-    category_filter = st.selectbox("Choose a category", options  = new_df[new_df["Issue"]==issue_filter].Category.unique())
+        if user_input.lower() == 'exit':
+            st.write("Çıkış yapılıyor...")
+        elif user_input and st.session_state.selected_response is None:
+            response_percentages = chatbot(user_input, data, model)
+            if response_percentages:
+                response_texts = [f"{i+1}. {text}: %{percentage:.2f}" for i, (text, percentage) in enumerate(response_percentages)]
+                st.session_state.chat_history.append({"user": user_input, "bot": response_texts})
+                selected_response = st.radio("Select a response:", response_texts, key="response_radio")
+                
+                if selected_response:
+                    st.session_state.selected_response = selected_response
 
-st.dataframe(new_df[(new_df['Issue'] == issue_filter) & (new_df['Category'] == category_filter)])
+                    if "bankaya gitmelisin" in selected_response.lower():
+                        st.write("Bankaya Gitmen Gerek.")
+                    elif "telefon numarasına yönlendirsin" in selected_response.lower():
+                        st.write("Lutfen bu numara ile musteri hizmetlerine ulasiniz: 123-456-7890")
 
-st.markdown("")
-st.write("*Next*, we can visualize our data quickly using `st.metrics` and `st.bar_plot`")
+        if st.session_state.selected_response:
+            next_action = st.radio("Ne Yapmak Istiyorsun?", ("Yazismaya devam et", "Yazismayi kapat"), key="next_action_radio")
 
-issue_cnt = len(new_df[new_df['Issue']==True])
-total_cnt = len(new_df)
-issue_perc = f"{issue_cnt/total_cnt*100:.0f}%"
+            if next_action == "Yazismaya devam et":
+                st.session_state.conversation_active = True
+                st.session_state.selected_response = None
+            elif next_action == "Yazismayi kapat":
+                st.write("İyi Günler Dilerim!")
+                st.session_state.chat_history = []  # Clear chat history
+                st.session_state.conversation_active = False
+                st.session_state.selected_response = None  # Reset selected response to hide options
 
-col1, col2 = st.columns([1,1])
-with col1:
-    st.metric("Number of responses",issue_cnt)
-with col2:
-    st.metric("Annotation Progress", issue_perc)
+    if st.session_state.conversation_active and st.session_state.chat_history:
+        for chat in st.session_state.chat_history:
+            st.write(f"**Kullanıcı:** {chat['user']}")
+            for response in chat['bot']:
+                st.write(f"**Bot:** {response}")
 
-df_plot = new_df[new_df['Category']!=''].Category.value_counts().reset_index()
-
-st.bar_chart(df_plot, x = 'Category', y = 'count')
-
-st.write("Here we are at the end of getting started with streamlit! Happy Streamlit-ing! :balloon:")
-
+if __name__ == "__main__":
+    main()
